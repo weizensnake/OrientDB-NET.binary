@@ -86,11 +86,24 @@ namespace Orient.Client
                 }
 
                 // if value is list or set type, get element type and enumerate over its elements
-                if (!type.GetTypeInfo().IsPrimitive && ImplementsIList(type) && !type.IsArray)
+                if (!type.GetTypeInfo().IsPrimitive && ImplementsIList(type))
                 {
-                    var value = (T)Activator.CreateInstance(type);
-                    Type elementType = type.GetTypeInfo().GetGenericArguments()[0];
+                    //If we are supposed to return an IList we instantiate it and add elements to it.
+                    //If we want to return an array we instantiate a List<> of the right type and finally
+                    //return the result of toArray() of that list.
                     IEnumerator enumerator = EnumerableFromField<T>(fieldValue).GetEnumerator();
+                    Type elementType = null;                                       
+                    Type listTypeForArray = null;
+                    IList tmpElementStorage = null;
+
+                    if (type.IsArray) {
+                        elementType = type.GetElementType();
+                        listTypeForArray = typeof(List<>).MakeGenericType(elementType);
+                        tmpElementStorage = (IList)Activator.CreateInstance(listTypeForArray);
+                    } else {
+                        elementType = type.GetTypeInfo().GetGenericArguments()[ 0 ];
+                        tmpElementStorage = (IList)Activator.CreateInstance(type);
+                    }
 
                     while (enumerator.MoveNext())
                     {
@@ -101,22 +114,27 @@ namespace Orient.Client
                             var instance = Activator.CreateInstance(elementType);
                             ((ODocument)enumerator.Current).Map(ref instance);
 
-                            ((IList)value).Add(instance);
+                            tmpElementStorage.Add(instance);
                         }
                         else
                         {
                             try
                             {
-                                ((IList)value).Add(enumerator.Current);
+                                tmpElementStorage.Add(enumerator.Current);
                             }
                             catch
                             {
-                                ((IList)value).Add(Convert.ChangeType(enumerator.Current, elementType));
+                                tmpElementStorage.Add(Convert.ChangeType(enumerator.Current, elementType));
                             }
                         }
                     }
 
-                    return value;
+                    if (type.IsArray) {
+                        MethodInfo toArrayMethod = listTypeForArray.GetTypeInfo().GetMethod("ToArray");
+                        return (T)toArrayMethod.Invoke(tmpElementStorage, null);
+                    }
+
+                    return (T)tmpElementStorage;
                 }
 
                 if (type.Name == "HashSet`1")
